@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hydro Dash: Swimming Race</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+
+        :root {
+            --pool-blue: #0077b6;
+            --water-ripple: #48cae4;
+            --swimmer-red: #e63946;
+            --swimmer-green: #2a9d8f;
+            --lane-white: #f1faee;
+            --dark-text: #1d3557;
+            --bg-light: #f4f6f9;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-light);
+            color: var(--dark-text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+
+        .game-container {
+            width: 95%;
+            max-width: 800px;
+            background-color: var(--lane-white);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 2.25rem;
+            margin-bottom: 10px;
+            color: var(--pool-blue);
+        }
+
+        h2 {
+            font-size: 1.25rem;
+            font-weight: 400;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border-radius: 12px;
+            background-color: var(--pool-blue);
+            box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.2);
+            margin-bottom: 20px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .control-button {
+            flex-grow: 1;
+            padding: 15px 10px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.1s ease, box-shadow 0.1s ease;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.1);
+            user-select: none; /* Prevent text selection on tap */
+        }
+
+        .control-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        #buttonA {
+            background-color: var(--swimmer-green);
+            color: var(--lane-white);
+        }
+        #buttonL {
+            background-color: var(--swimmer-red);
+            color: var(--lane-white);
+        }
+
+        .info-bar {
+            background-color: var(--pool-blue);
+            color: var(--lane-white);
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+
+        #messageBox {
+            font-size: 1.5rem;
+            font-weight: 900;
+            margin-top: 20px;
+            color: var(--swimmer-red);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Responsive adjustments for desktop/keyboard users */
+        @media (min-width: 600px) {
+            .touch-controls {
+                display: none; /* Hide touch controls on larger screens */
+            }
+        }
+
+        /* Responsive adjustments for mobile/touch users */
+        @media (max-width: 599px) {
+            h1 {
+                font-size: 1.75rem;
+            }
+            h2 {
+                font-size: 1rem;
+            }
+            .info-bar {
+                font-size: 0.9rem;
+            }
+            .control-button {
+                padding: 12px 8px;
+                font-size: 1.2rem;
+            }
+            .keyboard-instructions {
+                display: none; /* Hide keyboard instructions on smaller screens */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-container">
+        <h1>Hydro Dash</h1>
+        <div class="info-bar">
+            Goal: Race to the end of the pool (500 units)!
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="300"></canvas>
+
+        <div id="status"></div>
+
+        <h2 class="keyboard-instructions">Use keys 'A' and 'L' to race! (Must alternate strokes!)</h2>
+
+        <div class="controls touch-controls">
+            <button id="buttonA" class="control-button">A (Left Stroke)</button>
+            <button id="buttonL" class="control-button">L (Right Stroke)</button>
+        </div>
+
+        <div id="messageBox">Press 'A' or 'L' to Start!</div>
+    </div>
+
+    <script>
+        // --- Game Setup Variables ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageBox = document.getElementById('messageBox');
+        const statusDiv = document.getElementById('status');
+        const RACE_DISTANCE = 500; // Units to travel
+        const LANE_HEIGHT = 100;
+        const DRAG_FACTOR = 0.985; // Slow down speed each frame
+        const BOOST_AMOUNT = 3.5;  // Speed added per stroke
+
+        let gameRunning = false;
+        let lastTimestamp = 0;
+        let animationFrameId = null;
+
+        // --- Swimmer Data (Player and CPU) ---
+        const swimmers = [
+            {
+                name: "Player",
+                color: '#e63946', // Red
+                y: LANE_HEIGHT * 0.5,
+                x: 0,
+                speed: 0,
+                lastStrokeKey: null,
+                requiredStroke: 'L'
+            },
+            {
+                name: "CPU Champ",
+                color: '#2a9d8f', // Green
+                y: LANE_HEIGHT * 1.5,
+                x: 0,
+                speed: 0,
+                // CPU doesn't care about alternating, just base speed and randomness
+                cpuSpeedBase: 2.0,
+                cpuSpeedVariation: 0.8
+            }
+        ];
+
+        // --- Core Drawing Functions ---
+
+        function drawBackground() {
+            // Draw the water (main pool color is set via CSS background)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Subtle dark ripple overlay
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Lane Separators
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'; // Light color for separators
+            ctx.fillRect(0, LANE_HEIGHT, canvas.width, 5); // Middle line
+
+            // Draw Lane Lines (The main lane marker)
+            ctx.strokeStyle = '#f1faee';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(0, LANE_HEIGHT * 0.5);
+            ctx.lineTo(canvas.width, LANE_HEIGHT * 0.5);
+            ctx.moveTo(0, LANE_HEIGHT * 1.5);
+            ctx.lineTo(canvas.width, LANE_HEIGHT * 1.5);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset line dash
+
+            // Draw Finish Line (right edge)
+            ctx.strokeStyle = 'yellow';
+            ctx.lineWidth = 10;
+            ctx.beginPath();
+            ctx.moveTo(canvas.width - 20, 0);
+            ctx.lineTo(canvas.width - 20, canvas.height);
+            ctx.stroke();
+            ctx.lineWidth = 1; // Reset line width
+        }
+
+        function drawSwimmer(swimmer) {
+            const laneCenterY = swimmer.y + (canvas.height / 3); // Calculate absolute Y position
+            const normalizedX = (swimmer.x / RACE_DISTANCE) * (canvas.width - 40) + 20; // Map x to canvas coordinates
+
+            // 1. Draw the Swimmer Body (Simple circle/head)
+            ctx.fillStyle = swimmer.color;
+            ctx.beginPath();
+            ctx.arc(normalizedX, laneCenterY, 15, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 2. Draw 'Goggles' (for visual appeal)
+            ctx.fillStyle = '#1d3557';
+            ctx.beginPath();
+            ctx.arc(normalizedX - 5, laneCenterY - 2, 4, 0, Math.PI * 2);
+            ctx.arc(normalizedX + 5, laneCenterY - 2, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawGame() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawBackground();
+
+            swimmers.forEach(drawSwimmer);
+
+            // Update Status Display
+            statusDiv.innerHTML = `
+                <div style="display: flex; justify-content: space-around; font-weight: bold;">
+                    <span style="color: ${swimmers[0].color};">Player Progress: ${Math.min(100, (swimmers[0].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
+                    <span style="color: ${swimmers[1].color};">CPU Progress: ${Math.min(100, (swimmers[1].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
+                </div>
+            `;
+        }
+
+        // --- Game Logic Functions ---
+
+        function handleStroke(key) {
+            if (!gameRunning) {
+                startGame();
+                return;
+            }
+
+            const player = swimmers[0];
+            const strokeKey = key.toUpperCase();
+
+            // Check for correct alternating stroke
+            if (player.lastStrokeKey === null || strokeKey !== player.lastStrokeKey) {
+                // Successful stroke!
+                player.speed += BOOST_AMOUNT;
+                player.lastStrokeKey = strokeKey;
+                messageBox.textContent = `Stroke ${strokeKey} successful!`;
+            } else {
+                // Failed non-alternating stroke (penalty or stall)
+                player.speed *= 0.8; // Minor penalty
+                messageBox.textContent = `Miss! Must alternate to the ${player.lastStrokeKey === 'A' ? 'L' : 'A'} stroke!`;
+            }
+
+            // Clamp max speed
+            player.speed = Math.min(player.speed, 20);
+        }
+
+        function updateGame(deltaTime) {
+            if (!gameRunning) return;
+
+            const player = swimmers[0];
+            const cpu = swimmers[1];
+
+            // 1. Player Update
+            player.x += player.speed * (deltaTime / 16.6);
+            player.speed *= DRAG_FACTOR;
+
+            // 2. CPU Update
+            // CPU speed is based on a base rate plus some randomized variation
+            let cpuEffectiveSpeed = cpu.cpuSpeedBase + (Math.sin(Date.now() / 500) * cpu.cpuSpeedVariation);
+            cpu.x += cpuEffectiveSpeed * (deltaTime / 16.6);
+
+            // 3. Check for Win Condition
+            const winner = swimmers.find(s => s.x >= RACE_DISTANCE);
+
+            if (winner) {
+                endGame(winner.name);
+            }
+        }
+
+        function gameLoop(timestamp) {
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            const deltaTime = timestamp - lastTimestamp;
+            lastTimestamp = timestamp;
+
+            updateGame(deltaTime);
+            drawGame();
+
+            if (gameRunning) {
+                animationFrameId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function startGame() {
+            swimmers[0].x = 0;
+            swimmers[0].speed = 0;
+            swimmers[0].lastStrokeKey = null;
+
+            swimmers[1].x = 0;
+            swimmers[1].speed = 0;
+
+            messageBox.textContent = "RACE START! Go, Go, Go!";
+            messageBox.style.color = '#1d3557';
+            gameRunning = true;
+            lastTimestamp = 0;
+            requestAnimationFrame(gameLoop);
+        }
+
+        function endGame(winnerName) {
+            gameRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            if (winnerName === 'Player') {
+                messageBox.textContent = "YOU WIN! Fantastic Dash!";
+                messageBox.style.color = '#2a9d8f';
+            } else {
+                messageBox.textContent = "CPU WINS! Try again, press 'A' or 'L' to restart.";
+                messageBox.style.color = '#e63946';
+            }
+        }
+
+        // --- Event Listeners and Initialization ---
+
+        // 1. Keyboard Input
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toUpperCase();
+            if (key === 'A' || key === 'L') {
+                e.preventDefault(); // Prevent scrolling if A/L are used for other actions
+                handleStroke(key);
+            }
+        });
+
+        // 2. Touch/Mouse Input (for mobile and on-screen buttons)
+        document.getElementById('buttonA').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleStroke('A');
+        });
+
+        document.getElementById('buttonL').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleStroke('L');
+        });
+
+        // 3. Resize Listener for responsiveness (Redraws the initial state on resize)
+        function resizeCanvas() {
+            // Set canvas size dynamically based on container size
+            const container = document.querySelector('.game-container');
+            const containerWidth = container.clientWidth - 40; // Account for padding
+            canvas.width = containerWidth > 800 ? 800 : containerWidth;
+            canvas.height = 300;
+            drawGame(); // Redraw initial state
+        }
+
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            drawGame(); // Initial draw before race starts
+        });
+
+    </script>
+</body>
+</html>
