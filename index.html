@@ -46,21 +46,74 @@
             color: var(--pool-blue);
         }
 
-        h2 {
-            font-size: 1.25rem;
-            font-weight: 400;
-            margin-bottom: 20px;
-        }
-
         canvas {
             display: block;
             width: 100%;
             border-radius: 12px;
             background-color: var(--pool-blue);
             box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.2);
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
 
+        .game-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .settings-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            margin-bottom: 15px;
+        }
+
+        .settings-bar label, .settings-bar select {
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--dark-text);
+        }
+
+        .settings-bar select {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 2px solid var(--pool-blue);
+            background-color: white;
+            appearance: none;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .action-button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.1s, transform 0.1s;
+            box-shadow: 0 3px 0 rgba(0, 0, 0, 0.2);
+        }
+
+        .action-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+        }
+
+        .primary-button {
+            background-color: var(--swimmer-green);
+            color: var(--lane-white);
+            flex-grow: 1;
+        }
+        
+        .primary-button:disabled {
+            background-color: #aaa;
+            cursor: not-allowed;
+            box-shadow: 0 0 0 transparent;
+        }
+
+        /* Touch/Keyboard Stroke Controls */
         .controls {
             display: flex;
             justify-content: space-around;
@@ -78,7 +131,7 @@
             cursor: pointer;
             transition: transform 0.1s ease, box-shadow 0.1s ease;
             box-shadow: 0 4px 0 rgba(0, 0, 0, 0.1);
-            user-select: none; /* Prevent text selection on tap */
+            user-select: none;
         }
 
         .control-button:active {
@@ -95,6 +148,7 @@
             color: var(--lane-white);
         }
 
+        /* Status & Messages */
         .info-bar {
             background-color: var(--pool-blue);
             color: var(--lane-white);
@@ -107,28 +161,22 @@
         #messageBox {
             font-size: 1.5rem;
             font-weight: 900;
-            margin-top: 20px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            min-height: 24px; /* Ensure space even when empty */
             color: var(--swimmer-red);
         }
 
-        .hidden {
-            display: none !important;
-        }
-
-        /* Responsive adjustments for desktop/keyboard users */
+        /* Responsive adjustments */
         @media (min-width: 600px) {
             .touch-controls {
-                display: none; /* Hide touch controls on larger screens */
+                display: none !important; /* Hide touch controls on desktop */
             }
         }
 
-        /* Responsive adjustments for mobile/touch users */
         @media (max-width: 599px) {
             h1 {
                 font-size: 1.75rem;
-            }
-            h2 {
-                font-size: 1rem;
             }
             .info-bar {
                 font-size: 0.9rem;
@@ -137,8 +185,12 @@
                 padding: 12px 8px;
                 font-size: 1.2rem;
             }
-            .keyboard-instructions {
-                display: none; /* Hide keyboard instructions on smaller screens */
+            .settings-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .settings-bar select, .action-button {
+                width: 100%;
             }
         }
     </style>
@@ -147,22 +199,29 @@
 
     <div class="game-container">
         <h1>Hydro Dash</h1>
-        <div class="info-bar">
-            Goal: Race to the end of the pool (500 units)!
+        
+        <div class="game-controls">
+            <div class="settings-bar">
+                <label for="difficultySelector">CPU Difficulty:</label>
+                <select id="difficultySelector">
+                    <option value="easy">Easy (1.5 speed)</option>
+                    <option value="medium" selected>Medium (2.0 speed)</option>
+                    <option value="hard">Hard (2.5 speed)</option>
+                </select>
+                <button id="startButton" class="action-button primary-button">Start Race</button>
+            </div>
         </div>
 
         <canvas id="gameCanvas" width="800" height="300"></canvas>
 
         <div id="status"></div>
 
-        <h2 class="keyboard-instructions">Use keys 'A' and 'L' to race! (Must alternate strokes!)</h2>
+        <div id="messageBox">Select difficulty and press Start!</div>
 
         <div class="controls touch-controls">
-            <button id="buttonA" class="control-button">A (Left Stroke)</button>
-            <button id="buttonL" class="control-button">L (Right Stroke)</button>
+            <button id="buttonA" class="control-button" disabled>A (Left Stroke)</button>
+            <button id="buttonL" class="control-button" disabled>L (Right Stroke)</button>
         </div>
-
-        <div id="messageBox">Press 'A' or 'L' to Start!</div>
     </div>
 
     <script>
@@ -171,6 +230,9 @@
         const ctx = canvas.getContext('2d');
         const messageBox = document.getElementById('messageBox');
         const statusDiv = document.getElementById('status');
+        const startButton = document.getElementById('startButton');
+        const difficultySelector = document.getElementById('difficultySelector');
+
         const RACE_DISTANCE = 500; // Units to travel
         const LANE_HEIGHT = 100;
         const DRAG_FACTOR = 0.985; // Slow down speed each frame
@@ -179,26 +241,40 @@
         let gameRunning = false;
         let lastTimestamp = 0;
         let animationFrameId = null;
+        let waterOffset = 0; // For water animation
+        let countdownIntervalId = null;
+
+        // Difficulty presets that change the CPU's base speed
+        const difficultySettings = {
+            'easy': { base: 1.5, variation: 0.6 },
+            'medium': { base: 2.0, variation: 0.8 },
+            'hard': { base: 2.5, variation: 1.0 }
+        };
+
+        // --- COLOR CONSTANTS (for JavaScript use) ---
+        // Using explicit hex values as JavaScript cannot directly use CSS var() syntax in style properties.
+        const COLOR_SWIMMER_RED = '#e63946';
+        const COLOR_SWIMMER_GREEN = '#2a9d8f';
+        const COLOR_DARK_TEXT = '#1d3557';
+        // ------------------------------------------
 
         // --- Swimmer Data (Player and CPU) ---
         const swimmers = [
             {
                 name: "Player",
-                color: '#e63946', // Red
+                color: COLOR_SWIMMER_RED, // Red
                 y: LANE_HEIGHT * 0.5,
                 x: 0,
                 speed: 0,
                 lastStrokeKey: null,
-                requiredStroke: 'L'
             },
             {
                 name: "CPU Champ",
-                color: '#2a9d8f', // Green
+                color: COLOR_SWIMMER_GREEN, // Green
                 y: LANE_HEIGHT * 1.5,
                 x: 0,
                 speed: 0,
-                // CPU doesn't care about alternating, just base speed and randomness
-                cpuSpeedBase: 2.0,
+                cpuSpeedBase: 2.0, // Default, updated on start
                 cpuSpeedVariation: 0.8
             }
         ];
@@ -206,12 +282,33 @@
         // --- Core Drawing Functions ---
 
         function drawBackground() {
-            // Draw the water (main pool color is set via CSS background)
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Subtle dark ripple overlay
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Draw the water background (main pool color is set via CSS background on canvas)
+
+            // Draw Animated Water Ripples
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // Light white ripple overlay
+            const waveHeight = 8;
+            const waveLength = 40;
+            waterOffset = (waterOffset + 0.5) % waveLength;
+
+            for (let i = 0; i < canvas.width / waveLength + 2; i++) {
+                const x = i * waveLength - waterOffset;
+
+                // Draw wavy ripple for the entire pool surface
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                // Simple sine-like approximation for wave tops
+                ctx.quadraticCurveTo(x + waveLength / 4, waveHeight, x + waveLength / 2, 0);
+                ctx.quadraticCurveTo(x + waveLength * 3 / 4, -waveHeight, x + waveLength, 0);
+                
+                // Draw a full rectangle underneath the wave tops to cover the whole canvas
+                ctx.lineTo(x + waveLength, canvas.height);
+                ctx.lineTo(x, canvas.height);
+                ctx.closePath();
+                ctx.fill();
+            }
 
             // Draw Lane Separators
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'; // Light color for separators
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'; 
             ctx.fillRect(0, LANE_HEIGHT, canvas.width, 5); // Middle line
 
             // Draw Lane Lines (The main lane marker)
@@ -237,8 +334,26 @@
         }
 
         function drawSwimmer(swimmer) {
-            const laneCenterY = swimmer.y + (canvas.height / 3); // Calculate absolute Y position
-            const normalizedX = (swimmer.x / RACE_DISTANCE) * (canvas.width - 40) + 20; // Map x to canvas coordinates
+            const laneCenterY = swimmer.y + (canvas.height / 3); 
+            // Map x position (0 to RACE_DISTANCE) to canvas coordinates (20 to canvas.width - 20)
+            const normalizedX = (swimmer.x / RACE_DISTANCE) * (canvas.width - 40) + 20;
+
+            // 0. Draw speed-based ripples behind the swimmer
+            const rippleLength = swimmer.speed * 4;
+            if (rippleLength > 1) {
+                const alpha = Math.min(0.5, swimmer.speed / 10);
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
+                ctx.beginPath();
+                // Simple ellipse for ripple animation
+                ctx.ellipse(
+                    normalizedX - 10 - (rippleLength / 2), 
+                    laneCenterY, 
+                    rippleLength, 
+                    8, 
+                    0, 0, Math.PI * 2
+                );
+                ctx.fill();
+            }
 
             // 1. Draw the Swimmer Body (Simple circle/head)
             ctx.fillStyle = swimmer.color;
@@ -264,20 +379,27 @@
 
             // Update Status Display
             statusDiv.innerHTML = `
-                <div style="display: flex; justify-content: space-around; font-weight: bold;">
-                    <span style="color: ${swimmers[0].color};">Player Progress: ${Math.min(100, (swimmers[0].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
-                    <span style="color: ${swimmers[1].color};">CPU Progress: ${Math.min(100, (swimmers[1].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
+                <div class="info-bar">
+                    <div style="display: flex; justify-content: space-around;">
+                        <span style="color: white;">PLAYER: ${Math.min(100, (swimmers[0].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
+                        <span style="color: white;">CPU: ${Math.min(100, (swimmers[1].x / RACE_DISTANCE * 100)).toFixed(1)}%</span>
+                    </div>
                 </div>
             `;
         }
 
         // --- Game Logic Functions ---
 
+        function setControlsEnabled(enabled) {
+            document.getElementById('buttonA').disabled = !enabled;
+            document.getElementById('buttonL').disabled = !enabled;
+            // Only disable start button when the race is running or counting down
+            startButton.disabled = enabled;
+            difficultySelector.disabled = enabled;
+        }
+
         function handleStroke(key) {
-            if (!gameRunning) {
-                startGame();
-                return;
-            }
+            if (!gameRunning) return;
 
             const player = swimmers[0];
             const strokeKey = key.toUpperCase();
@@ -287,15 +409,15 @@
                 // Successful stroke!
                 player.speed += BOOST_AMOUNT;
                 player.lastStrokeKey = strokeKey;
-                messageBox.textContent = `Stroke ${strokeKey} successful!`;
+                messageBox.textContent = `Stroke ${strokeKey} successful! Keep Alternating!`;
             } else {
                 // Failed non-alternating stroke (penalty or stall)
-                player.speed *= 0.8; // Minor penalty
-                messageBox.textContent = `Miss! Must alternate to the ${player.lastStrokeKey === 'A' ? 'L' : 'A'} stroke!`;
+                player.speed *= 0.7; // Stronger penalty for missed stroke
+                messageBox.textContent = `SPLASH! Mistake! Must alternate to the ${player.lastStrokeKey === 'A' ? 'L' : 'A'} stroke!`;
             }
 
             // Clamp max speed
-            player.speed = Math.min(player.speed, 20);
+            player.speed = Math.min(player.speed, 25);
         }
 
         function updateGame(deltaTime) {
@@ -303,15 +425,19 @@
 
             const player = swimmers[0];
             const cpu = swimmers[1];
+            const timeFactor = deltaTime / 16.6; // Normalize speed based on 60 FPS target
 
             // 1. Player Update
-            player.x += player.speed * (deltaTime / 16.6);
-            player.speed *= DRAG_FACTOR;
+            player.x += player.speed * timeFactor;
+            player.speed *= DRAG_FACTOR; // Apply drag
 
             // 2. CPU Update
-            // CPU speed is based on a base rate plus some randomized variation
+            // CPU speed is based on selected difficulty plus a randomized, smoother variation
             let cpuEffectiveSpeed = cpu.cpuSpeedBase + (Math.sin(Date.now() / 500) * cpu.cpuSpeedVariation);
-            cpu.x += cpuEffectiveSpeed * (deltaTime / 16.6);
+            cpu.x += cpuEffectiveSpeed * timeFactor;
+            
+            // Apply slight drag to CPU speed to prevent infinite acceleration, though their speed is mostly defined by base.
+            cpu.speed = cpuEffectiveSpeed; 
 
             // 3. Check for Win Condition
             const winner = swimmers.find(s => s.x >= RACE_DISTANCE);
@@ -334,7 +460,40 @@
             }
         }
 
+        function handleCountdown(initialCountdown) {
+            let countdown = initialCountdown;
+            
+            // Disable everything during the countdown
+            setControlsEnabled(false);
+            startButton.disabled = true;
+
+            messageBox.style.color = COLOR_DARK_TEXT;
+            messageBox.textContent = `Starting in ${countdown}...`;
+
+            countdownIntervalId = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    messageBox.textContent = countdown;
+                } else if (countdown === 0) {
+                    messageBox.textContent = "GO!!!";
+                    messageBox.style.color = COLOR_SWIMMER_RED; // Fixed color reference
+                } else {
+                    clearInterval(countdownIntervalId);
+                    setControlsEnabled(true); // Enable controls after GO!
+                    gameRunning = true;
+                    lastTimestamp = 0;
+                    requestAnimationFrame(gameLoop);
+                }
+            }, 1000);
+        }
+
         function startGame() {
+            // Stop any existing countdown
+            if (countdownIntervalId) {
+                clearInterval(countdownIntervalId);
+            }
+
+            // Reset swimmers
             swimmers[0].x = 0;
             swimmers[0].speed = 0;
             swimmers[0].lastStrokeKey = null;
@@ -342,11 +501,14 @@
             swimmers[1].x = 0;
             swimmers[1].speed = 0;
 
-            messageBox.textContent = "RACE START! Go, Go, Go!";
-            messageBox.style.color = '#1d3557';
-            gameRunning = true;
-            lastTimestamp = 0;
-            requestAnimationFrame(gameLoop);
+            // Read difficulty setting and apply to CPU
+            const selectedDifficulty = difficultySelector.value;
+            const settings = difficultySettings[selectedDifficulty];
+            swimmers[1].cpuSpeedBase = settings.base;
+            swimmers[1].cpuSpeedVariation = settings.variation;
+
+            // Start the countdown sequence
+            handleCountdown(3);
         }
 
         function endGame(winnerName) {
@@ -357,21 +519,29 @@
 
             if (winnerName === 'Player') {
                 messageBox.textContent = "YOU WIN! Fantastic Dash!";
-                messageBox.style.color = '#2a9d8f';
+                messageBox.style.color = COLOR_SWIMMER_GREEN; // Fixed color reference
             } else {
-                messageBox.textContent = "CPU WINS! Try again, press 'A' or 'L' to restart.";
-                messageBox.style.color = '#e63946';
+                messageBox.textContent = "CPU WINS! Better luck next time!";
+                messageBox.style.color = COLOR_SWIMMER_RED; // Fixed color reference
             }
+            
+            // Update UI for restart
+            startButton.textContent = 'Restart Race';
+            startButton.disabled = false;
+            difficultySelector.disabled = false;
         }
 
         // --- Event Listeners and Initialization ---
 
         // 1. Keyboard Input
         document.addEventListener('keydown', (e) => {
-            const key = e.key.toUpperCase();
-            if (key === 'A' || key === 'L') {
-                e.preventDefault(); // Prevent scrolling if A/L are used for other actions
-                handleStroke(key);
+            // Only process input if controls are enabled (i.e., after "GO!!!")
+            if (startButton.disabled) {
+                const key = e.key.toUpperCase();
+                if (key === 'A' || key === 'L') {
+                    e.preventDefault(); 
+                    handleStroke(key);
+                }
             }
         });
 
@@ -386,11 +556,15 @@
             handleStroke('L');
         });
 
-        // 3. Resize Listener for responsiveness (Redraws the initial state on resize)
+        // 3. Start Button
+        startButton.addEventListener('click', startGame);
+
+        // 4. Resize Listener for responsiveness
         function resizeCanvas() {
-            // Set canvas size dynamically based on container size
             const container = document.querySelector('.game-container');
-            const containerWidth = container.clientWidth - 40; // Account for padding
+            // Calculate width, accounting for padding (20px left/right = 40px total)
+            const containerWidth = container.clientWidth - 40; 
+            // Cap max width at 800px, otherwise use container width
             canvas.width = containerWidth > 800 ? 800 : containerWidth;
             canvas.height = 300;
             drawGame(); // Redraw initial state
@@ -400,6 +574,8 @@
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             drawGame(); // Initial draw before race starts
+            setControlsEnabled(false); // Initially disable stroke controls
+            startButton.disabled = false; // Ensure start button is enabled
         });
 
     </script>
